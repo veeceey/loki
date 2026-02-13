@@ -113,7 +113,7 @@ func TestStorageEquality(t *testing.T) {
 		).Generate()
 		return &store{
 			Name:   name,
-			Cases:  cases[:20],
+			Cases:  cases,
 			Engine: engine,
 		}
 	}
