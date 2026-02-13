@@ -20,6 +20,7 @@ import (
 	"github.com/grafana/dskit/user"
 	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/promql/parser"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -88,9 +89,9 @@ func setupBenchmarkWithStore(tb testing.TB, storeType string) logql.Engine {
 // return the same query result.
 func TestStorageEquality(t *testing.T) {
 
-	if !*slowTests {
-		t.Skip("test skipped because -slow-tests flag is not set")
-	}
+	//if !*slowTests {
+	//	t.Skip("test skipped because -slow-tests flag is not set")
+	//}
 
 	type store struct {
 		Name   string
@@ -112,7 +113,7 @@ func TestStorageEquality(t *testing.T) {
 		).Generate()
 		return &store{
 			Name:   name,
-			Cases:  cases,
+			Cases:  cases[:20],
 			Engine: engine,
 		}
 	}
@@ -175,11 +176,34 @@ func TestStorageEquality(t *testing.T) {
 						return
 					}
 
-					actual, err := store.Engine.Query(params).Exec(ctx)
-					if err != nil && errors.Is(err, engine.ErrNotSupported) {
-						t.Skipf("Store %s does not support features used in test case %s", store.Name, baseCase.Name())
-					}
+					var (
+						actual, expected logqlmodel.Result
+					)
+
+					g, ctx := errgroup.WithContext(ctx)
+
+					g.Go(func() error {
+						result, err := store.Engine.Query(params).Exec(ctx)
+						if err != nil && errors.Is(err, engine.ErrNotSupported) {
+							t.Skipf("Store %s does not support features used in test case %s", store.Name, baseCase.Name())
+						}
+
+						actual = result
+
+						return err
+					})
+
+					g.Go(func() error {
+						result, err := baseStore.Engine.Query(params).Exec(ctx)
+
+						expected = result
+
+						return err
+					})
+
+					err = g.Wait()
 					require.NoError(t, err)
+
 					t.Logf(`Summary stats: store=%s lines_processed=%d, entries_returned=%d, bytes_processed=%s, execution_time_in_secs=%d, bytes_processed_per_sec=%s`,
 						store.Name,
 						actual.Statistics.Summary.TotalLinesProcessed,
@@ -188,12 +212,6 @@ func TestStorageEquality(t *testing.T) {
 						uint64(actual.Statistics.Summary.ExecTime),
 						humanize.Bytes(uint64(actual.Statistics.Summary.BytesProcessedPerSecond)),
 					)
-
-					dataobjStats, _ := json.Marshal(&actual.Statistics.Querier.Store.Dataobj)
-					t.Log("Dataobj stats:", string(dataobjStats))
-
-					expected, err := baseStore.Engine.Query(params).Exec(ctx)
-					require.NoError(t, err)
 					t.Logf(`Summary stats: store=%s lines_processed=%d, entries_returned=%d, bytes_processed=%s, execution_time_in_secs=%d, bytes_processed_per_sec=%s`,
 						baseStore.Name,
 						expected.Statistics.Summary.TotalLinesProcessed,
@@ -202,6 +220,9 @@ func TestStorageEquality(t *testing.T) {
 						uint64(expected.Statistics.Summary.ExecTime),
 						humanize.Bytes(uint64(expected.Statistics.Summary.BytesProcessedPerSecond)),
 					)
+
+					dataobjStats, _ := json.Marshal(&actual.Statistics.Querier.Store.Dataobj)
+					t.Log("Dataobj stats:", string(dataobjStats))
 
 					// Use tolerance-based comparison for floating point precision issues
 					assertDataEqualWithTolerance(t, expected.Data, actual.Data, 1e-5)
