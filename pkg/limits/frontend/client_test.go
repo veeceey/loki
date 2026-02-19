@@ -26,24 +26,24 @@ func TestCacheLimitsClient(t *testing.T) {
 				Streams: []*proto.StreamMetadata{{StreamHash: 0x1}, {StreamHash: 0x2}},
 			},
 			// Reject stream 0x1.
-			exceedsLimitsResponses: []*proto.ExceedsLimitsResponse{{
+			exceedsLimitsResponse: &proto.ExceedsLimitsResponse{
 				Results: []*proto.ExceedsLimitsResult{{
 					StreamHash: 0x1,
 					Reason:     uint32(limits.ReasonMaxStreams),
 				}},
-			}},
+			},
 		}
 		client := newCacheLimitsClient(cache, onMiss)
-		resps, err := client.ExceedsLimits(t.Context(), &proto.ExceedsLimitsRequest{
+		resp, err := client.ExceedsLimits(t.Context(), &proto.ExceedsLimitsRequest{
 			Tenant:  "test",
 			Streams: []*proto.StreamMetadata{{StreamHash: 0x1}, {StreamHash: 0x2}},
 		})
 		// The stream 0x1 should have been rejected, and should be absent
 		// from the cache.
 		require.NoError(t, err)
-		require.Len(t, resps, 1)
-		require.Len(t, resps[0].Results, 1)
-		require.Equal(t, uint64(0x1), resps[0].Results[0].StreamHash)
+		require.NotNil(t, resp)
+		require.Len(t, resp.Results, 1)
+		require.Equal(t, uint64(0x1), resp.Results[0].StreamHash)
 		b := bytes.Buffer{}
 		encodeStreamToBuf(&b, "test", &proto.StreamMetadata{StreamHash: 0x1})
 		require.False(t, cache.bf.Test(b.Bytes()))
@@ -63,15 +63,16 @@ func TestCacheLimitsClient(t *testing.T) {
 				Tenant:  "test",
 				Streams: []*proto.StreamMetadata{{StreamHash: 0x2}},
 			},
-			exceedsLimitsResponses: []*proto.ExceedsLimitsResponse{},
+			exceedsLimitsResponse: &proto.ExceedsLimitsResponse{},
 		}
 		client := newCacheLimitsClient(cache, onMiss)
-		resps, err := client.ExceedsLimits(t.Context(), &proto.ExceedsLimitsRequest{
+		resp, err := client.ExceedsLimits(t.Context(), &proto.ExceedsLimitsRequest{
 			Tenant:  "test",
 			Streams: []*proto.StreamMetadata{{StreamHash: 0x1}, {StreamHash: 0x2}},
 		})
 		require.NoError(t, err)
-		require.Len(t, resps, 0)
+		require.NotNil(t, resp)
+		require.Len(t, resp.Results, 0)
 	})
 }
 
